@@ -1,84 +1,11 @@
-////
-//// Created by hubert on 04.06.2020.
-////
 //
-//#include "server.h"
+// Created by hubert on 04.06.2020.
 //
-//int main()
-//{
-//	struct sockaddr_rc local_addr;
-//	struct sockaddr_rc remote_addr;
-//
-//	int sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-//
-//	if (sock < 0)
-//	{
-//		perror("Could not create socket\n");
-//		exit(-1);
-//	}
-//
-//	local_addr.rc_family = AF_BLUETOOTH;
-//	local_addr.rc_bdaddr = *BDADDR_ANY;
-//	local_addr.rc_channel = (uint8_t) 1;
-//
-//	if (bind(sock, (struct sockaddr*)&local_addr, sizeof(struct sockaddr_rc)) == -1)
-//	{
-//		perror("Could not bind\n");
-//		exit(-1);
-//	}
-//
-//	listen(sock,1);
-//	while(1){}
-//	close(sock);
-//}
 
 #include "server.h"
 
 int main(int argc, char **argv)
 {
-//	struct sockaddr_rc loc_addr = {0}, rem_addr = {0};
-//	char buf[1024] = {0};
-//	int s, client, bytes_read;
-//	socklen_t opt = sizeof(rem_addr);
-//
-//	// allocate socket
-//	s = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-//
-//	// bind socket to port 1 of the first available
-//	// local bluetooth adapter
-//	loc_addr.rc_family = AF_BLUETOOTH;
-//	loc_addr.rc_bdaddr = *BDADDR_ANY;
-//	loc_addr.rc_channel = (uint8_t) 1;
-//	bind(s, (struct sockaddr *) &loc_addr, sizeof(loc_addr));
-//
-//	//get local address ?
-//	//~ ba2str( &loc_addr.rc_bdaddr, buf );
-//	//~ fprintf(stdout, "local %s\n", buf);
-//
-//	// put socket into listening mode
-//	listen(s, 1);
-//
-//	// accept one connection
-//	client = accept(s, (struct sockaddr *) &rem_addr, &opt);
-//
-//	ba2str(&rem_addr.rc_bdaddr, buf);
-//	fprintf(stderr, "accepted connection from %s\n", buf);
-//
-//
-//	memset(buf, 0, sizeof(buf));
-//
-//	// read data from the client
-//	bytes_read = read(client, buf, sizeof(buf));
-//
-//	if (bytes_read > 0)
-//	{
-//		printf("received [%s]\n", buf);
-//	}
-//
-//	// close connection
-//	close(client);
-//	close(s);
-//	return 0;
 
 	init("0000");
 
@@ -86,41 +13,22 @@ int main(int argc, char **argv)
 	pthread_t connection_handler_thread;
 	pthread_create(&server_lifetime_management, NULL, (void *(*)(void *)) server_lifetime, NULL);
 	pthread_create(&connection_handler_thread, NULL, (void *(*)(void *)) connection_handler, NULL);
-	while (server_on)
-	{
 
-	}
+	pthread_join(server_lifetime_management, NULL);
+	pthread_join(connection_handler_thread, NULL);
 }
 
 int init(char *access_pin)
 {
-
-//	init_socket(&server, 1);
-
-	// create main socket for bluetooth communication with hosts
-//	bl_socket = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-	// allocate memory for local address info
-
-//	memset(&local_address, 0, sizeof(struct sockaddr_rc));
-//	local_address.rc_family = AF_BLUETOOTH;
-//	local_address.rc_channel = (uint8_t) 1;
-//	local_address.rc_bdaddr = *BDADDR_ANY;
-
-	// try to bind socket to address
-//	if (bind(bl_socket, (struct sockaddr *) &local_address, sizeof(struct sockaddr_rc)))
-//	{
-//		perror("Could not bind socket to address\n");
-//		return -1;
-//	}
-//
-//	listen(bl_socket, 1);
-
 	PIN = access_pin;
 	server_on = true;
 	clients_served = 0;
 	clients = (struct clients_in_service *) malloc(MAX_SERVED * sizeof(struct clients_in_service));
 	for (int i = 0; i < MAX_SERVED; i++)
+	{
 		clients[i].len = sizeof(struct sockaddr_rc);
+		clients[i].conn_established = false;
+	}
 	return 0;
 }
 
@@ -164,13 +72,31 @@ void connection_handler()
 		}
 
 		const int channel = clients_served;
+
+		struct message msg;
+		read(server.client_fd, &msg, sizeof(struct message));
+
+		if (msg.flag != HELLO)
+		{
+			struct message ret = {RESET, "", "SERVER"};
+			write(server.client_fd, &ret, sizeof(struct message));
+			close(server.sock);
+			continue;
+		}
+
+		strcpy(clients[clients_served].clients_name, msg.username);
+
 		// initialize new socket for client
 		init_socket(&clients[clients_served], channel + 2);
 
-		// transform FD into stream
-		server.stream = fdopen(server.client_fd, "w");
-		// tell client which channel was assigned for him
-		fprintf(server.stream, "%d", channel);
+
+		strcpy(msg.username, "SERVER");
+		char ch[10];
+		sprintf(ch, "%d", channel + 2);
+		strcpy(msg.text, ch);
+		msg.flag = REDIRECT;
+
+		write(server.client_fd, &msg, sizeof(struct message));
 
 		close(server.sock);
 		pthread_t accept_new;
@@ -184,6 +110,7 @@ void connection_handler()
 
 void accept_new_connection(void *id)
 {
+	pthread_mutex_lock(&mutex);
 	struct clients_in_service *tmp;
 	tmp = &clients[*(int *) id];
 	listen(tmp->sock, 1);
@@ -196,6 +123,8 @@ void accept_new_connection(void *id)
 		perror(message);
 		exit(-1);
 	}
+	tmp->conn_established = true;
+	pthread_mutex_unlock(&mutex);
 }
 
 void init_socket(struct clients_in_service *client, int channel)
@@ -212,5 +141,26 @@ void init_socket(struct clients_in_service *client, int channel)
 		sprintf(message, "Could not bind socket to channel %d\n", client->remote_address.rc_channel);
 		perror(message);
 		exit(-1);
+	}
+}
+
+void read_from_clients()
+{
+	for (int i = 0; i < MAX_SERVED; i++)
+	{
+		if (!clients[i].conn_established)
+			continue;
+
+		struct message *msg = (struct message*) malloc(sizeof(struct message));
+
+		int b_read = read(clients[i].client_fd, &msg, sizeof(struct message));
+
+		if (b_read <= 0)
+		{
+			free(msg);
+			continue;
+		}
+
+
 	}
 }

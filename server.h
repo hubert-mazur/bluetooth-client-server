@@ -16,30 +16,45 @@
 #include <bluetooth/rfcomm.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <bluetooth/hci.h>
+#include <bluetooth/hci_lib.h>
 
 #define MAX_SERVED 10
 
 struct clients_in_service {
+	char clients_name[30];
 	int client_fd;
-	char* clients_name;
+	int sock;
 	struct sockaddr_rc remote_address;
 	socklen_t len;
-	FILE *stream;
-	int sock;
+	bool conn_established;
 };
 
-int bl_socket;
-char *PIN;
+struct message {
+	int flag;
+	char text[1024];
+	char username[30];
+};
+
+enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4 };
+
 int clients_served;
-bool server_on;
-pthread_mutex_t mutex;
-struct clients_in_service *clients;
+char *PIN;
 struct clients_in_service server;
+struct clients_in_service *clients;
+pthread_mutex_t mutex;
+bool server_on;
 
 int init(char *access_pin);
+
 void server_lifetime();
+
 void connection_handler();
-void accept_new_connection(void * id);
+
+void accept_new_connection(void *id);
+
 void init_socket(struct clients_in_service *client, int channel);
+
+void read_from_clients();
 
 #endif //BLUETOOTH_CLIENT_SERVER_SERVER_H
