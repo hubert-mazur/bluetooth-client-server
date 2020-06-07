@@ -27,7 +27,7 @@ struct clients_in_service {
 	int sock;
 	struct sockaddr_rc remote_address;
 	socklen_t len;
-	bool conn_established;
+	struct clients_in_service *next;
 };
 
 struct message {
@@ -44,6 +44,7 @@ struct clients_in_service server;
 struct clients_in_service *clients;
 pthread_mutex_t mutex;
 bool server_on;
+struct clients_in_service *root;
 
 int init(char *access_pin);
 
@@ -56,5 +57,12 @@ void accept_new_connection(void *id);
 void init_socket(struct clients_in_service *client, int channel);
 
 void read_from_clients();
+
+void handle_message(struct message *msg, struct clients_in_service *client);
+
+void send_msg(const char content[1024], const char user[30], int fl);
+
+void close_client_connection(struct clients_in_service *client);
+
 
 #endif //BLUETOOTH_CLIENT_SERVER_SERVER_H
