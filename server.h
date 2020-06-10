@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/hci_lib.h>
+#include <fcntl.h>
 
 #define MAX_SERVED 10
 
@@ -32,11 +33,11 @@ struct clients_in_service {
 
 struct message {
 	int flag;
-	char text[1024];
+	char text[512];
 	char username[30];
 };
 
-enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4 };
+enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4, OK = 5 };
 
 int clients_served;
 char *PIN;
@@ -45,6 +46,7 @@ struct clients_in_service *clients;
 pthread_mutex_t mutex;
 bool server_on;
 struct clients_in_service *root;
+
 
 int init(char *access_pin);
 
@@ -60,7 +62,7 @@ void read_from_clients();
 
 void handle_message(struct message *msg, struct clients_in_service *client);
 
-void send_msg(const char content[1024], const char user[30], int fl);
+void send_msg(const char content[512], const char user[30], int fl);
 
 void close_client_connection(struct clients_in_service *client);
 
