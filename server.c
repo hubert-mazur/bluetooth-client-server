@@ -104,7 +104,7 @@ void connection_handler()
 //		strcpy(clients[clients_served].clients_name, msg.username);
 
 		// initialize new socket for client
-		init_socket(elem_to_add, channel +5);
+		init_socket(elem_to_add, channel + 5);
 		pthread_t accept_new;
 		pthread_create(&accept_new, NULL, (void *(*)(void *)) accept_new_connection, (void *) elem_to_add);
 

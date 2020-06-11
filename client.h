@@ -49,6 +49,7 @@ pthread_t lifetime_thread;
 pthread_t read_thread;
 WINDOW *write_window;
 WINDOW *read_window;
+int cursor_position;
 
 void init();
 void connect_to_server();
