@@ -48,6 +48,7 @@ void init()
 	conn.remote_address.rc_channel = (uint8_t) 1;
 	str2ba("58:00:E3:4D:0D:B8", &conn.remote_address.rc_bdaddr);
 	client_on = true;
+	cursor_position = 1;
 }
 
 void connect_to_server()
@@ -89,7 +90,6 @@ void connect_to_server()
 	//////
 
 
-//	printf("channel is: %d\n", channel);
 	printf("I AM RIGHT HERE\n");
 	for (int i = 0; i < 5; i++)
 	{
@@ -137,10 +137,11 @@ void handle_message(struct message *msg)
 	{
 		case PLAIN:
 		{
-			printf("[%s]: %s\n", msg->username, msg->text);
 			char tmp[542];
 			sprintf(tmp, "[%s]: %s\n", msg->username, msg->text);
+			wmove(read_window, cursor_position, 1);
 			wprintw(read_window, tmp);
+			cursor_position++;
 			wrefresh(read_window);
 			wrefresh(write_window);
 			free(msg);
