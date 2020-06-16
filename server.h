@@ -44,7 +44,7 @@ char *PIN;
 struct clients_in_service server;
 struct clients_in_service *clients;
 pthread_mutex_t mutex;
-bool server_on;
+volatile bool server_on;
 struct clients_in_service *root;
 
 
@@ -65,6 +65,9 @@ void handle_message(struct message *msg, struct clients_in_service *client);
 void send_msg(const char content[512], const char user[30], int fl);
 
 void close_client_connection(struct clients_in_service *client);
+
+void close_server();
+
 
 
 #endif //BLUETOOTH_CLIENT_SERVER_SERVER_H

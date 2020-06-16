@@ -7,7 +7,6 @@
 int main(int argc, char **argv)
 {
 	init("0000");
-	printf("size : %d\n", sizeof(struct message));
 	pthread_t server_lifetime_management;
 	pthread_t connection_handler_thread;
 	pthread_t collect;
@@ -18,9 +17,16 @@ int main(int argc, char **argv)
 
 	while (server_on)
 	{}
-	pthread_join(server_lifetime_management, NULL);
-	pthread_join(connection_handler_thread, NULL);
-	pthread_join(collect, NULL);
+
+	close_server();
+	pthread_cancel(server_lifetime_management);
+	pthread_cancel(connection_handler_thread);
+	pthread_cancel(collect);
+
+//	pthread_join(server_lifetime_management, NULL);
+//	pthread_join(connection_handler_thread, NULL);
+//	pthread_join(collect, NULL);
+	return 0;
 }
 
 int init(char *access_pin)
@@ -53,7 +59,6 @@ void connection_handler()
 	{
 		if (clients_served >= MAX_SERVED)
 		{
-			// TODO: Implement CPU free for 500 ms
 			continue;
 		}
 
@@ -77,7 +82,6 @@ void connection_handler()
 				sizeof(struct clients_in_service));
 
 		const int channel = clients_served;
-		printf("HERE\n");
 		struct message msg;
 
 		/////
@@ -87,7 +91,6 @@ void connection_handler()
 		while ((b_read = read(server.client_fd, &msg + received, sizeof(struct message) - received)) > 0 &&
 			   received < sizeof(struct message))
 		{
-			printf("Read: %d\n", b_read);
 			received += b_read;
 		}
 
@@ -117,7 +120,6 @@ void connection_handler()
 		write(server.client_fd, &msg, sizeof(struct message));
 
 		close(server.sock);
-		printf("Closed socket\n");
 
 
 		pthread_mutex_lock(&mutex);
@@ -240,6 +242,7 @@ void send_msg(const char content[512], const char user[30], int fl)
 	{
 		write(client->client_fd, &ms, sizeof(struct message));
 		client = client->next;
+		printf("RETRANSMITTED!\n");
 	}
 }
 
@@ -262,5 +265,20 @@ void close_client_connection(struct clients_in_service *client)
 	struct clients_in_service *nn = tmp->next->next;
 	free(client);
 	tmp->next = nn;
+}
+
+void close_server()
+{
+	struct clients_in_service *tmp = root;
+	struct message msg = {CLOSE, "", "SERVER"};
+	while (tmp != NULL)
+	{
+		struct clients_in_service *next = tmp->next;
+		write(tmp->sock, &msg, sizeof(struct message));
+		close(tmp->sock);
+		free(tmp);
+		tmp = next;
+	}
+	root = NULL;
 }
 
