@@ -1,147 +1,181 @@
-#include <stdio.h>
-// POSIX sys lib: fork, pipe, I/O (read, write)
-#include <unistd.h>
-// superset of unistd, same
-#include <stdlib.h>
-
-//Bluetooth
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/rfcomm.h>
-#include <bluetooth/hci.h>
-#include <bluetooth/hci_lib.h>
-#include <bluetooth/sdp.h>
-#include <bluetooth/sdp_lib.h>
-#include <bluetooth/sco.h>
-
-//socket
-#include <sys/socket.h>
+#include "client.h"
 
 
 int main(int argc, char **argv)
 {
-	int flag = 0;
-
-	struct sockaddr_rc addrress = {0};
-	int s, status;
-
-	char dest[18] = "";// = "B0:10:41:3F:6E:80";//My destination address Laptop
-	char namelaptop[20] = "hubert-Lenovo";
-
-
-	// allocate a socket
-	s = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-	///create a socket
-
-	// set the connection parameters (who to connect to)
-	addrress.rc_family = AF_BLUETOOTH;
-	addrress.rc_channel = (uint8_t) 1;//must use sdp to work in real devices
-	//may this channel not ready
-
-
+//	printf("Type server's name: ");
+//	scanf("%s", server_name);
+	strcpy(server_name, "hubert-Lenovo");
+	init();
 	printf("Search for BT Devices...\n");
+	connect_to_server();
+//	noecho();
+	cbreak();
+//	wtimeout(read_window, 100);
+//	wtimeout(write_window, 100);
+//	timeout(100);
+	initscr();
+	client_on = true;
+	write_window = newwin(10, COLS, LINES - 10, 0);
+	read_window = newwin(LINES - 11, COLS, 0, 0);
+	refresh();
+	box(write_window, LINES - 5, 0);
+	box(read_window, LINES - 5, 0);
+	wrefresh(write_window);
+	wrefresh(read_window);
 
-///search
+	pthread_create(&read_thread, NULL, (void *(*)(void *)) read_messages, NULL);
 
-	inquiry_info *ii = NULL;
-	int max_rsp, num_rsp;
-	int dev_id, sock, len, flags;
-	int i;
+	char *txt = (char *) malloc(512 * sizeof(char));
 
-	char addr[18] = {0};
-	char name[248] = {0};
-
-	dev_id = hci_get_route(NULL);
-	sock = hci_open_dev(dev_id);
-	if (dev_id < 0 || sock < 0)
+	while (client_on)
 	{
-		perror("opening socket");
-		exit(1);
-	}
-
-	len = 8;
-	max_rsp = 2;
-	flags = IREQ_CACHE_FLUSH;
-	ii = (inquiry_info *) malloc(max_rsp * sizeof(inquiry_info));
-
-	num_rsp = hci_inquiry(dev_id, len, max_rsp, NULL, &ii, flags);
-	if (num_rsp < 0)
-	{
-		perror("hci_inquiry");
-	}
-
-	for (i = 0; i < num_rsp; i++)
-	{
-		ba2str(&(ii + i)->bdaddr, addr);
-		memset(name, 0, sizeof(name));
-		if (hci_read_remote_name(sock, &(ii + i)->bdaddr, sizeof(name),
-								 name, 0) < 0)
-			strcpy(name, "[unknown]");
-
-		else
+		txt[0] = '\0';
+		mvwgetstr(write_window, 1, 1, txt);
+		if (txt[0] != '\0')
 		{
-			printf("\nFind #%d\n", i);
+			send_message(txt);
+			wrefresh(write_window);
+			wclear(write_window);
+			box(write_window, LINES - 5, 0);
+		}
+	}
+	wrefresh(read_window);
+	wrefresh(write_window);
+	endwin();
+	free(txt);
+	return 0;
+}
 
-			printf("Addr:%s    Name:%s\n", addr, name);
 
-			int a = strcmp(name, namelaptop);
-			//printf("compare:%d\n",a);
+void init()
+{
+	conn.sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
+	conn.remote_address.rc_family = AF_BLUETOOTH;
+	conn.remote_address.rc_channel = (uint8_t) 1;
+	str2ba("58:00:E3:4D:0D:B8", &conn.remote_address.rc_bdaddr);
+	client_on = true;
+	cursor_position = 1;
+}
 
-			if (!a)
-			{   // if name mached
-				str2ba(addr, &addrress.rc_bdaddr);//copy dest-->addr.rc_bdaddr
-				flag = 1;
-			}
+void connect_to_server()
+{
+	for (int i = 0; i < 5; i++)
+	{
+		if (connect(conn.sock, (struct sockaddr *) &conn.remote_address, sizeof(conn.remote_address)))
+		{
+			perror("Could not connect. Retry in 5 seconds\n");
+			sleep(5);
+			continue;
+		}
+		printf("Connection established to main \n");
+		break;
+	}
+
+	struct message msg = {HELLO, "", "testUser"};
+
+	write(conn.sock, &msg, sizeof(msg));
+	int b_read = 0;
+	int received = 0;
+
+	while ((b_read = read(conn.sock, &msg + received, sizeof(struct message) - received)) > 0 &&
+		   received < sizeof(struct message))
+		received += b_read;
+
+
+	close(conn.sock);
+	uint8_t channel = (uint8_t) strtol(msg.text, NULL, 0);
+
+	struct connection cc;
+	cc.sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
+	cc.remote_address.rc_family = AF_BLUETOOTH;
+	cc.remote_address.rc_channel = (uint8_t) channel;
+//	printf("Channel is: %d\n", channel);
+	str2ba("58:00:E3:4D:0D:B8", &cc.remote_address.rc_bdaddr);
+
+
+	for (int i = 0; i < 5; i++)
+	{
+		if (connect(cc.sock, (struct sockaddr *) &cc.remote_address, sizeof(cc.remote_address)))
+		{
+			perror("Could not connect. Retry in 5 seconds\n");
+			sleep(5);
+			continue;
 		}
 
+		if (cc.sock < 0)
+		{
+			perror("Error, fd < 0 \n");
+			exit(-1);
+		}
+		printf("Connection established. You are free to write\n");
+//		fcntl(cc.sock, F_SETFL, O_NONBLOCK);
+		break;
 	}
+}
 
-
-/// End Search
-
-
-
-///Connect and send
-
-	if (flag == 0)
+void read_messages()
+{
+	while (client_on)
 	{
-		printf("Not find dest: %s\n", name);
-		exit(0);
+//		wrefresh(read_window);
+//		wrefresh(write_window);
+		struct message *msg = (struct message *) malloc(sizeof(struct message));
+
+		int b_read;
+		int received = 0;
+//		pthread_mutex_lock(&io_mutex);
+		while ((b_read = read(conn.sock, msg + received, sizeof(struct message))) >= 0 &&
+			   received < sizeof(struct message))
+			received += b_read;
+
+		wrefresh(read_window);
+//		pthread_mutex_unlock(&io_mutex);
+		if (received > 0)
+			handle_message(msg);
 	}
+}
 
-	// connect to server, throw socket s
-	status = connect(s, (struct sockaddr *) &addrress, sizeof(addrress));
-	//successful, connect() returns 0.
-
-	printf("connection status: %d\n\n", status);//0 show OK
-
-	FILE *stream = fdopen(s, "r");
-	int channel = -666;
-	// send a message to server
-	if (status == 0)
+void handle_message(struct message *msg)
+{
+	switch (msg->flag)
 	{
-//		status = write(s, "hello!", 6);
-		printf("scanning\n");
-//		fscanf(stream, "%d", &channel);
-		read(s, &channel, sizeof(int));
-		printf("New channel for communication: %d", channel);
+		case PLAIN:
+		{
+			char tmp[543];
+			sprintf(tmp, "[%s]: %s\n", msg->username, msg->text);
+			wmove(read_window, cursor_position, 1);
+			wprintw(read_window, tmp);
+			cursor_position++;
+			wrefresh(read_window);
+//			wrefresh(write_window);
+			free(msg);
+			break;
+		}
 
+		case CLOSE:
+		{
+			client_on = false;
+			close(conn.sock);
+			free(msg);
+			break;
+		}
 	}
-	else if (status < 0)
+}
+
+void send_message(char *msg)
+{
+	struct message mess;
+	strcpy(mess.username, "testUser");
+	strcpy(mess.text, msg);
+	mess.flag = PLAIN;
+	if (!strcmp(mess.text, "[/q]"))
 	{
-		perror("send message to server Failed\n");
+		mess.flag = CLOSE;
+		client_on = false;
+		close(conn.sock);
 	}
-
-	printf("Closing socket\n");
-
-	///close the socket
-	close(s);
-	while (1)
-	{}
-///End connect and send
-
-
-	free(ii);
-	close(sock);
-
-	return 0;
+//	pthread_mutex_lock(&io_mutex);
+	write(conn.sock, &mess, sizeof(struct message));
+//	pthread_mutex_unlock(&io_mutex);
 }

@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <bluetooth/hci.h>
 #include <bluetooth/hci_lib.h>
+#include <fcntl.h>
 
 #define MAX_SERVED 10
 
@@ -27,23 +28,25 @@ struct clients_in_service {
 	int sock;
 	struct sockaddr_rc remote_address;
 	socklen_t len;
-	bool conn_established;
+	struct clients_in_service *next;
 };
 
 struct message {
 	int flag;
-	char text[1024];
+	char text[512];
 	char username[30];
 };
 
-enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4 };
+enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4, OK = 5 };
 
 int clients_served;
 char *PIN;
 struct clients_in_service server;
 struct clients_in_service *clients;
 pthread_mutex_t mutex;
-bool server_on;
+volatile bool server_on;
+struct clients_in_service *root;
+
 
 int init(char *access_pin);
 
@@ -56,5 +59,15 @@ void accept_new_connection(void *id);
 void init_socket(struct clients_in_service *client, int channel);
 
 void read_from_clients();
+
+void handle_message(struct message *msg, struct clients_in_service *client);
+
+void send_msg(const char content[512], const char user[30], int fl);
+
+void close_client_connection(struct clients_in_service *client);
+
+void close_server();
+
+
 
 #endif //BLUETOOTH_CLIENT_SERVER_SERVER_H

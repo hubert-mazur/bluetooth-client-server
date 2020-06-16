@@ -6,16 +6,27 @@
 
 int main(int argc, char **argv)
 {
-
 	init("0000");
-
 	pthread_t server_lifetime_management;
 	pthread_t connection_handler_thread;
+	pthread_t collect;
+
 	pthread_create(&server_lifetime_management, NULL, (void *(*)(void *)) server_lifetime, NULL);
 	pthread_create(&connection_handler_thread, NULL, (void *(*)(void *)) connection_handler, NULL);
+	pthread_create(&collect, NULL, (void *(*)(void *)) read_from_clients, NULL);
 
-	pthread_join(server_lifetime_management, NULL);
-	pthread_join(connection_handler_thread, NULL);
+	while (server_on)
+	{}
+
+	close_server();
+	pthread_cancel(server_lifetime_management);
+	pthread_cancel(connection_handler_thread);
+	pthread_cancel(collect);
+
+//	pthread_join(server_lifetime_management, NULL);
+//	pthread_join(connection_handler_thread, NULL);
+//	pthread_join(collect, NULL);
+	return 0;
 }
 
 int init(char *access_pin)
@@ -23,12 +34,8 @@ int init(char *access_pin)
 	PIN = access_pin;
 	server_on = true;
 	clients_served = 0;
-	clients = (struct clients_in_service *) malloc(MAX_SERVED * sizeof(struct clients_in_service));
-	for (int i = 0; i < MAX_SERVED; i++)
-	{
-		clients[i].len = sizeof(struct sockaddr_rc);
-		clients[i].conn_established = false;
-	}
+
+	root = NULL;
 	return 0;
 }
 
@@ -52,14 +59,14 @@ void connection_handler()
 	{
 		if (clients_served >= MAX_SERVED)
 		{
-			// TODO: Implement CPU free for 500 ms
 			continue;
 		}
 
 		init_socket(&server, 1);
+
 		listen(server.sock, 1);
 		server.client_fd = accept(server.sock, (struct sockaddr *) &server.remote_address, &server.len);
-
+//		fcntl(server.sock, F_SETFL, O_NONBLOCK);
 		printf("INFO: ACCEPTED CONNECTION\n");
 
 		if (server.client_fd < 0)
@@ -71,36 +78,49 @@ void connection_handler()
 			exit(-1);
 		}
 
-		const int channel = clients_served;
+		struct clients_in_service *elem_to_add = (struct clients_in_service *) malloc(
+				sizeof(struct clients_in_service));
 
+		const int channel = clients_served;
 		struct message msg;
-		read(server.client_fd, &msg, sizeof(struct message));
+
+		/////
+
+		int b_read;
+		int received = 0;
+		while ((b_read = read(server.client_fd, &msg + received, sizeof(struct message) - received)) > 0 &&
+			   received < sizeof(struct message))
+		{
+			received += b_read;
+		}
 
 		if (msg.flag != HELLO)
 		{
+			printf("Client DID NOT sent HELLO FLAG\n");
 			struct message ret = {RESET, "", "SERVER"};
 			write(server.client_fd, &ret, sizeof(struct message));
 			close(server.sock);
 			continue;
 		}
 
-		strcpy(clients[clients_served].clients_name, msg.username);
+		strcpy(elem_to_add->clients_name, msg.username);
+//		strcpy(clients[clients_served].clients_name, msg.username);
 
 		// initialize new socket for client
-		init_socket(&clients[clients_served], channel + 2);
-
+		init_socket(elem_to_add, channel + 5);
+		pthread_t accept_new;
+		pthread_create(&accept_new, NULL, (void *(*)(void *)) accept_new_connection, (void *) elem_to_add);
 
 		strcpy(msg.username, "SERVER");
 		char ch[10];
-		sprintf(ch, "%d", channel + 2);
+		sprintf(ch, "%d", channel + 5);
 		strcpy(msg.text, ch);
 		msg.flag = REDIRECT;
 
 		write(server.client_fd, &msg, sizeof(struct message));
 
 		close(server.sock);
-		pthread_t accept_new;
-		pthread_create(&accept_new, NULL, (void *(*)(void *)) accept_new_connection, (void *) &channel);
+
 
 		pthread_mutex_lock(&mutex);
 		clients_served++;
@@ -111,29 +131,44 @@ void connection_handler()
 void accept_new_connection(void *id)
 {
 	pthread_mutex_lock(&mutex);
-	struct clients_in_service *tmp;
-	tmp = &clients[*(int *) id];
-	listen(tmp->sock, 1);
-	tmp->client_fd = accept(tmp->sock, (struct sockaddr *) &tmp->remote_address, &tmp->len);
-	if (tmp->client_fd < 0)
+	struct clients_in_service *elem = (struct clients_in_service *) (id);
+
+	listen(elem->sock, 1);
+	printf("WAITING for connection on channel %d\n", elem->remote_address.rc_channel);
+	elem->client_fd = accept(elem->sock, (struct sockaddr *) &elem->remote_address, &elem->len);
+	fcntl(elem->client_fd, F_SETFL, O_NONBLOCK);
+	if (elem->client_fd < 0)
 	{
 		char message[100];
 		sprintf(message, "Could not obtain FD for communication on channel %d\n",
-				tmp->remote_address.rc_channel);
+				elem->remote_address.rc_channel);
 		perror(message);
 		exit(-1);
 	}
-	tmp->conn_established = true;
+	printf("ACCEPTED ON channel: %d\n", elem->remote_address.rc_channel);
+	if (!root)
+	{
+		root = elem;
+	}
+	else
+	{
+		struct clients_in_service *tmp = root;
+		while (tmp->next != NULL)
+			tmp = tmp->next;
+		tmp->next = elem;
+		elem->next = NULL;
+	}
+
 	pthread_mutex_unlock(&mutex);
 }
 
 void init_socket(struct clients_in_service *client, int channel)
 {
+	printf("TOLD TO INIT SOCKET ON CHANNEL: %d \n", channel);
 	client->remote_address.rc_channel = (uint8_t) channel;
 	client->remote_address.rc_family = AF_BLUETOOTH;
 	client->remote_address.rc_bdaddr = *BDADDR_ANY;
 	client->sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
-
 
 	if (bind(client->sock, (struct sockaddr *) &client->remote_address, sizeof(struct sockaddr_rc)))
 	{
@@ -146,21 +181,104 @@ void init_socket(struct clients_in_service *client, int channel)
 
 void read_from_clients()
 {
-	for (int i = 0; i < MAX_SERVED; i++)
+	while (server_on)
 	{
-		if (!clients[i].conn_established)
-			continue;
-
-		struct message *msg = (struct message*) malloc(sizeof(struct message));
-
-		int b_read = read(clients[i].client_fd, &msg, sizeof(struct message));
-
-		if (b_read <= 0)
+		struct clients_in_service *tmp = root;
+		while (tmp != NULL)
 		{
-			free(msg);
-			continue;
-		}
+			struct message *msg = (struct message *) malloc(sizeof(struct message));
 
+			int b_read;
+			int received = 0;
+			while ((b_read = read(tmp->client_fd, msg + received, sizeof(struct message))) >= 0 &&
+				   received < sizeof(struct message))
+			{
+//				printf("Read: %d\n", b_read);
+				received += b_read;
+			}
+
+
+			if (received == 0)
+			{
+				free(msg);
+				tmp = tmp->next;
+				continue;
+			}
+			else
+//				printf("READ BYTES: %d\n", received);
+
+				printf("%s\n", msg->text);
+			handle_message(msg, tmp);
+			tmp = tmp->next;
+		}
 
 	}
 }
+
+void handle_message(struct message *msg, struct clients_in_service *client)
+{
+	switch (msg->flag)
+	{
+		case PLAIN:
+		{
+			send_msg(msg->text, msg->username, msg->flag);
+			break;
+		}
+		case CLOSE:
+		{
+			close_client_connection(client);
+		}
+	}
+}
+
+void send_msg(const char content[512], const char user[30], int fl)
+{
+	struct message ms;
+	ms.flag = fl;
+	strcpy(ms.text, content);
+	strcpy(ms.username, user);
+	struct clients_in_service *client = root;
+	while (client != NULL)
+	{
+		write(client->client_fd, &ms, sizeof(struct message));
+		client = client->next;
+		printf("RETRANSMITTED!\n");
+	}
+}
+
+void close_client_connection(struct clients_in_service *client)
+{
+	struct clients_in_service *tmp = root;
+	if (client == root)
+	{
+		close(client->client_fd);
+		free(client);
+		root = NULL;
+		return;
+	}
+
+	while (tmp->next != client)
+	{
+		tmp = tmp->next;
+	}
+
+	struct clients_in_service *nn = tmp->next->next;
+	free(client);
+	tmp->next = nn;
+}
+
+void close_server()
+{
+	struct clients_in_service *tmp = root;
+	struct message msg = {CLOSE, "", "SERVER"};
+	while (tmp != NULL)
+	{
+		struct clients_in_service *next = tmp->next;
+		write(tmp->sock, &msg, sizeof(struct message));
+		close(tmp->sock);
+		free(tmp);
+		tmp = next;
+	}
+	root = NULL;
+}
+
