@@ -37,18 +37,17 @@ struct message {
 	char username[30];
 };
 
-enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4, OK = 5 };
+enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4, IGNORE = 5 };
 
-int clients_served;
-char *PIN;
 struct clients_in_service server;
 struct clients_in_service *clients;
-pthread_mutex_t mutex;
-volatile bool server_on;
 struct clients_in_service *root;
+const char name[] = "SERVER";
+volatile bool server_on;
+int clients_served;
+pthread_mutex_t mutex;
 
-
-int init(char *access_pin);
+int init();
 
 void server_lifetime();
 
@@ -67,7 +66,5 @@ void send_msg(const char content[512], const char user[30], int fl);
 void close_client_connection(struct clients_in_service *client);
 
 void close_server();
-
-
 
 #endif //BLUETOOTH_CLIENT_SERVER_SERVER_H
