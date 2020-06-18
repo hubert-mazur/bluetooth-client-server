@@ -49,8 +49,11 @@ Firstly, you will be asked to type your name (or nickname, which will be used in
 After establishing connection to server, on client's screen two windows are printed:
 one for writing message, second one for reading. Messages from server are instantly displayed in reading window.
 While writing, escape character is '\n' - this sends message. To quit application, simply type sequence: [\q] and hit enter.
-This will lead to connection close and returning from app. 
+This will lead to connection close and returning from app. Client app window is presented below
 ```
+
+![](pic.png)
+
 
 #### server app
 

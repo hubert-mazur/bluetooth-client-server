@@ -43,9 +43,11 @@ void server_lifetime()
 	{
 		if (getc(stdin) == 'q')
 		{
+			close_server();
 			pthread_mutex_lock(&mutex);
 			server_on = false;
 			pthread_mutex_unlock(&mutex);
+
 			return;
 		}
 	}
@@ -273,13 +275,17 @@ void read_from_clients()
 
 	void close_server()
 	{
+		char *ms = (char*) malloc(512 * sizeof(char));
+		strcpy(ms, "SERVER IS BEING SHUT DOWN");
+		send_msg(ms, name, PLAIN);
+
 		struct clients_in_service *tmp = root;
 		struct message msg = {CLOSE, "", "SERVER"};
 		while (tmp != NULL)
 		{
 			struct clients_in_service *next = tmp->next;
-			write(tmp->sock, &msg, sizeof(struct message));
-			close(tmp->sock);
+			write(tmp->client_fd, &msg, sizeof(struct message));
+			close(tmp->client_fd);
 			free(tmp);
 			tmp = next;
 		}
