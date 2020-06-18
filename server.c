@@ -37,6 +37,9 @@ int init()
 	return 0;
 }
 
+/**
+ * Function handling server lifetime, sets flag when user wants to exit by typing q key
+ * */
 void server_lifetime()
 {
 	while (true)
@@ -53,6 +56,10 @@ void server_lifetime()
 	}
 }
 
+/**
+ * Function responsible for new connections with clients, if there are not more than 10 clients server, listens on channel 1 for new connections,
+ * returns back to client new channel number and closes connection.
+ */
 void connection_handler()
 {
 	while (server_on)
@@ -62,9 +69,12 @@ void connection_handler()
 			continue;
 		}
 
+		// initialize socket on channel one for new connection
 		init_socket(&server, 1);
 
+		// put socket into listening mode
 		listen(server.sock, 1);
+		// accept connections from clients
 		server.client_fd = accept(server.sock, (struct sockaddr *) &server.remote_address, &server.len);
 //		fcntl(server.sock, F_SETFL, O_NONBLOCK);
 //		printf("INFO: ACCEPTED CONNECTION\n");
@@ -78,19 +88,21 @@ void connection_handler()
 			exit(-1);
 		}
 
+		// prepare space for new client in chat server
 		struct clients_in_service *elem_to_add = (struct clients_in_service *) malloc(
 				sizeof(struct clients_in_service));
 
 		const int channel = clients_served;
 		struct message msg;
 
-
+		// read from client what he sent
 		int b_read;
 		int received = 0;
 		while ((b_read = read(server.client_fd, &msg + received, sizeof(struct message) - received)) > 0 &&
 			   received < sizeof(struct message))
 			received += b_read;
 
+		// client got to say hello first, and say who is he, otherwise connection can not be established
 		if (msg.flag != HELLO)
 		{
 			printf("Client DID NOT sent HELLO FLAG\n");
@@ -104,8 +116,10 @@ void connection_handler()
 		strcpy(elem_to_add->clients_name, msg.username);
 
 		// initialize new socket for client
+		// init socket for client
 		init_socket(elem_to_add, channel + 5);
 		pthread_t accept_new;
+		// spawn thread waiting for client to come on new channel
 		pthread_create(&accept_new, NULL, (void *(*)(void *)) accept_new_connection, (void *) elem_to_add);
 
 		strcpy(msg.username, name);
@@ -114,8 +128,10 @@ void connection_handler()
 		strcpy(msg.text, ch);
 		msg.flag = REDIRECT;
 
+		// write client information about channel number which will be used for permanent communication
 		write(server.client_fd, &msg, sizeof(struct message));
 
+		// close this socket
 		close(server.sock);
 
 		pthread_mutex_lock(&mutex);
@@ -132,6 +148,7 @@ void accept_new_connection(void *id)
 	listen(elem->sock, 1);
 //	printf("WAITING for connection on channel %d\n", elem->remote_address.rc_channel);
 	elem->client_fd = accept(elem->sock, (struct sockaddr *) &elem->remote_address, &elem->len);
+	// set socket in non-blocking mode- read does not block write
 	fcntl(elem->client_fd, F_SETFL, O_NONBLOCK);
 	if (elem->client_fd < 0)
 	{
@@ -142,6 +159,7 @@ void accept_new_connection(void *id)
 		exit(-1);
 	}
 	printf("ACCEPTED ON channel: %d\n", elem->remote_address.rc_channel);
+	// put new client into clients served list
 	if (!root)
 	{
 		root = elem;
@@ -157,6 +175,7 @@ void accept_new_connection(void *id)
 
 //	struct message mess = {IGNORE, "", "SERVER"};
 //	write(elem->client_fd, &mess, sizeof(struct message));
+	// notify every client in chat of new user
 	char *info_msg = (char *) malloc(512 * sizeof(char));
 	sprintf(info_msg, "%s has joined the chat", elem->clients_name);
 	send_msg(info_msg, name, PLAIN);
@@ -166,6 +185,7 @@ void accept_new_connection(void *id)
 
 void init_socket(struct clients_in_service *client, int channel)
 {
+	// set channel, protocol etc.
 	client->remote_address.rc_channel = (uint8_t) channel;
 	client->remote_address.rc_family = AF_BLUETOOTH;
 	client->remote_address.rc_bdaddr = *BDADDR_ANY;
@@ -180,6 +200,9 @@ void init_socket(struct clients_in_service *client, int channel)
 	}
 }
 
+/**
+ * Iterate through clients and try to read from them
+ */
 void read_from_clients()
 {
 	while (server_on)
@@ -213,82 +236,95 @@ void read_from_clients()
 	}
 }
 
-	void handle_message(struct message *msg, struct clients_in_service *client)
+/**
+ * Decide what to do with received message
+ */
+void handle_message(struct message *msg, struct clients_in_service *client)
+{
+	switch (msg->flag)
 	{
-		switch (msg->flag)
+		// normal message, just retransmit
+		case PLAIN:
 		{
-			case PLAIN:
-			{
-				send_msg(msg->text, msg->username, msg->flag);
-				break;
-			}
-			case CLOSE:
-			{
-				char *tmp = (char*) malloc(512 * sizeof(char));
-				sprintf(tmp, "%s has left the chat", client->clients_name);
-				close_client_connection(client);
-				send_msg(tmp, name, PLAIN);
-				free(tmp);
-			}
-			case IGNORE:
-			{
-				return;
-			}
+			send_msg(msg->text, msg->username, msg->flag);
+			break;
 		}
-	}
-
-	void send_msg(const char content[512], const char user[30], int fl)
-	{
-		struct message ms;
-		ms.flag = fl;
-		strcpy(ms.text, content);
-		strcpy(ms.username, user);
-		struct clients_in_service *client = root;
-		while (client != NULL)
+			// client wants to close connection, ok then
+		case CLOSE:
 		{
-			write(client->client_fd, &ms, sizeof(struct message));
-			client = client->next;
+			char *tmp = (char *) malloc(512 * sizeof(char));
+			sprintf(tmp, "%s has left the chat", client->clients_name);
+			close_client_connection(client);
+			send_msg(tmp, name, PLAIN);
+			free(tmp);
 		}
-	}
-
-	void close_client_connection(struct clients_in_service *client)
-	{
-		struct clients_in_service *tmp = root;
-		if (client == root)
+			// unused
+		case IGNORE:
 		{
-			root = root->next;
-			close(client->client_fd);
-			free(client);
 			return;
 		}
-
-		while (tmp->next != client)
-		{
-			tmp = tmp->next;
-		}
-
-		struct clients_in_service *nn = tmp->next->next;
-		free(client);
-		tmp->next = nn;
-
 	}
+}
 
-	void close_server()
+// send message to client
+void send_msg(const char content[512], const char user[30], int fl)
+{
+	struct message ms;
+	ms.flag = fl;
+	strcpy(ms.text, content);
+	strcpy(ms.username, user);
+	struct clients_in_service *client = root;
+	while (client != NULL)
 	{
-		char *ms = (char*) malloc(512 * sizeof(char));
-		strcpy(ms, "SERVER IS BEING SHUT DOWN");
-		send_msg(ms, name, PLAIN);
-
-		struct clients_in_service *tmp = root;
-		struct message msg = {CLOSE, "", "SERVER"};
-		while (tmp != NULL)
-		{
-			struct clients_in_service *next = tmp->next;
-			write(tmp->client_fd, &msg, sizeof(struct message));
-			close(tmp->client_fd);
-			free(tmp);
-			tmp = next;
-		}
-		root = NULL;
+		write(client->client_fd, &ms, sizeof(struct message));
+		client = client->next;
 	}
+}
+
+/**
+ * close connection with client and delete him from list
+ */
+void close_client_connection(struct clients_in_service *client)
+{
+	struct clients_in_service *tmp = root;
+	if (client == root)
+	{
+		root = root->next;
+		close(client->client_fd);
+		free(client);
+		return;
+	}
+
+	while (tmp->next != client)
+	{
+		tmp = tmp->next;
+	}
+
+	struct clients_in_service *nn = tmp->next->next;
+	free(client);
+	tmp->next = nn;
+
+}
+
+/**
+ * Close connections with clients and shutdown server
+ */
+void close_server()
+{
+	char *ms = (char *) malloc(512 * sizeof(char));
+	strcpy(ms, "SERVER IS BEING SHUT DOWN");
+	send_msg(ms, name, PLAIN);
+
+	struct clients_in_service *tmp = root;
+	struct message msg = {CLOSE, "", "SERVER"};
+	while (tmp != NULL)
+	{
+		struct clients_in_service *next = tmp->next;
+		write(tmp->client_fd, &msg, sizeof(struct message));
+		close(tmp->client_fd);
+		free(tmp);
+		tmp = next;
+	}
+	root = NULL;
+}
 
