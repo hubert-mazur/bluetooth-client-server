@@ -3,12 +3,15 @@
 
 int main(int argc, char **argv)
 {
+	// scan clients name used in communication
 	printf("Type your name: ");
 	scanf("%s", user_name);
 
+	// scan server address which to connect
 	printf("Type server address: ");
 	scanf("%s", server_address);
 
+	// init screen for ncurses
 	initscr();
 	init();
 	connect_to_server();
@@ -19,7 +22,7 @@ int main(int argc, char **argv)
 	wrefresh(read_window);
 
 	char *txt = (char *) malloc(512 * sizeof(char));
-
+	// main loop, user message input
 	while (client_on)
 	{
 		strcpy(txt, "");
@@ -42,9 +45,11 @@ int main(int argc, char **argv)
 
 void init()
 {
+	// get rid of new line character in server address
 	server_address[strlen(server_address)] = '\0';
 	client_on = true;
 	cursor_position = 1;
+	// draw curses windows
 	write_window = newwin(10, COLS, LINES - 10, 0);
 	read_window = newwin(LINES - 11, COLS, 0, 0);
 	refresh();
@@ -53,12 +58,17 @@ void init()
 	box(write_window, LINES - 5, 0);
 	box(read_window, LINES - 5, 0);
 
+	// prepare socket
 	conn.sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
 	conn.remote_address.rc_family = AF_BLUETOOTH;
 	conn.remote_address.rc_channel = (uint8_t) 1;
+	// convert string address into system-friendly variable
 	str2ba(server_address, &conn.remote_address.rc_bdaddr);
 }
 
+/**
+ * Connect to server
+ */
 void connect_to_server()
 {
 	for (int i = 0; i < 5; i++)
@@ -73,6 +83,7 @@ void connect_to_server()
 		break;
 	}
 
+	// send HELLO flag
 	struct message msg;
 	strcpy(msg.username, user_name);
 	strcpy(msg.text, "");
@@ -82,7 +93,7 @@ void connect_to_server()
 
 	int b_read;
 	int received = 0;
-
+	// receive new channel for communication
 	while ((b_read = read(conn.sock, &msg + received, sizeof(struct message) - received)) > 0 &&
 		   received < sizeof(struct message))
 		received += b_read;
@@ -91,6 +102,7 @@ void connect_to_server()
 	close(conn.sock);
 	uint8_t channel = (uint8_t) strtol(msg.text, NULL, 0);
 
+	// once again prepare new socket for permanent communication with server
 	struct connection cc;
 	cc.sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
 	cc.remote_address.rc_family = AF_BLUETOOTH;
@@ -113,13 +125,16 @@ void connect_to_server()
 			exit(-1);
 		}
 		printf("Connection established. You are free to write\n");
-
+		// put socket in non-blocking mode, very important, otherwise messages will be read only after user will send own message
 		fcntl(cc.sock, F_SETFL, O_NONBLOCK);
 		memcpy(&conn, &cc, sizeof(struct connection));
 		break;
 	}
 }
 
+/**
+ * Function running in thread, tries to read from server
+ */
 void read_messages()
 {
 	while (client_on)
@@ -141,10 +156,14 @@ void read_messages()
 	}
 }
 
+/**
+ * Decide what to do with message sent by server
+ */
 void handle_message(struct message *msg)
 {
 	switch (msg->flag)
 	{
+		// plain message, print to screen
 		case PLAIN:
 		{
 			char tmp[543];
@@ -161,12 +180,14 @@ void handle_message(struct message *msg)
 			break;
 		}
 
+		// server said he is closing connection
 		case CLOSE:
 		{
 			client_on = false;
 			close(conn.sock);
 			break;
 		}
+		// unused
 		case IGNORE:
 		{
 			return;
@@ -179,6 +200,7 @@ void handle_message(struct message *msg)
 	}
 }
 
+// send PLAIN message to server
 void send_message(char *msg)
 {
 	struct message mess;
