@@ -44,6 +44,7 @@ struct clients_in_service *clients;
 struct clients_in_service *root;
 const char name[] = "SERVER";
 volatile bool server_on;
+bool channels_busy[29] = {0};
 int clients_served;
 pthread_mutex_t mutex;
 
@@ -55,7 +56,7 @@ void connection_handler();
 
 void accept_new_connection(void *id);
 
-void init_socket(struct clients_in_service *client, int channel);
+int init_socket(struct clients_in_service *client, int channel);
 
 void read_from_clients();
 
@@ -66,5 +67,7 @@ void send_msg(const char content[512], const char user[30], int fl);
 void close_client_connection(struct clients_in_service *client);
 
 void close_server();
+
+int get_next_channel(int start);
 
 #endif //BLUETOOTH_CLIENT_SERVER_SERVER_H

@@ -45,7 +45,7 @@ gcc server.c -lpthread -lbluetooth
 #### client app
 
 ```
-Firstly, you will be asked to type your name (or nickname, which will be used in conversation), and after that, server address (e.g 00:00:00:00:00:00).
+Firstly, you will be asked to type your name (or nickname, which will be used in conversation), and after that, server's human-friendly name (device name- set in BT options).
 After establishing connection to server, on client's screen two windows are printed:
 one for writing message, second one for reading. Messages from server are instantly displayed in reading window.
 While writing, escape character is '\n' - this sends message. To quit application, simply type sequence: [\q] and hit enter.

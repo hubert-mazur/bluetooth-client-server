@@ -15,17 +15,13 @@ int main(int argc, char **argv)
 	pthread_create(&connection_handler_thread, NULL, (void *(*)(void *)) connection_handler, NULL);
 	pthread_create(&collect, NULL, (void *(*)(void *)) read_from_clients, NULL);
 
-	while (server_on)
-	{}
-
-	close_server();
-	pthread_cancel(server_lifetime_management);
+	pthread_join(server_lifetime_management, NULL);
+	// thread that handles connection is canceled, because it might be waiting for new connection- put in listening mode, and will not be immediately affected by 'end' flag until client comes
 	pthread_cancel(connection_handler_thread);
-	pthread_cancel(collect);
+	pthread_join(collect, NULL);
+	close_server();
 
-//	pthread_join(server_lifetime_management, NULL);
-//	pthread_join(connection_handler_thread, NULL);
-//	pthread_join(collect, NULL);
+	printf("SERVER quit\n");
 	return 0;
 }
 
@@ -44,13 +40,11 @@ void server_lifetime()
 {
 	while (true)
 	{
-		if (getc(stdin) == 'q')
+		if (getchar() == 'q')
 		{
-			close_server();
 			pthread_mutex_lock(&mutex);
 			server_on = false;
 			pthread_mutex_unlock(&mutex);
-
 			return;
 		}
 	}
@@ -65,19 +59,23 @@ void connection_handler()
 	while (server_on)
 	{
 		if (clients_served >= MAX_SERVED)
-		{
 			continue;
-		}
 
 		// initialize socket on channel one for new connection
-		init_socket(&server, 1);
+		if (init_socket(&server, 1))
+		{
+			perror("Could not initialize socket on channel 1\n");
+			exit(-1);
+		}
 
 		// put socket into listening mode
 		listen(server.sock, 1);
+
 		// accept connections from clients
 		server.client_fd = accept(server.sock, (struct sockaddr *) &server.remote_address, &server.len);
+
 //		fcntl(server.sock, F_SETFL, O_NONBLOCK);
-//		printf("INFO: ACCEPTED CONNECTION\n");
+		printf("INFO: ACCEPTED CONNECTION\n");
 
 		if (server.client_fd < 0)
 		{
@@ -87,12 +85,11 @@ void connection_handler()
 			perror(message);
 			exit(-1);
 		}
-
 		// prepare space for new client in chat server
 		struct clients_in_service *elem_to_add = (struct clients_in_service *) malloc(
 				sizeof(struct clients_in_service));
 
-		const int channel = clients_served;
+
 		struct message msg;
 
 		// read from client what he sent
@@ -116,27 +113,31 @@ void connection_handler()
 		strcpy(elem_to_add->clients_name, msg.username);
 
 		// initialize new socket for client
-		// init socket for client
-		init_socket(elem_to_add, channel + 5);
+
+		const int channel = get_next_channel(0);
+		printf("CHANNEL IS: %d\n", channel);
+		init_socket(elem_to_add, channel);
 		pthread_t accept_new;
-		// spawn thread waiting for client to come on new channel
 		pthread_create(&accept_new, NULL, (void *(*)(void *)) accept_new_connection, (void *) elem_to_add);
+		channels_busy[channel] = true;
+		// spawn thread waiting for client to come on new channel
+		printf("new channel is: %d\n", channel);
 
 		strcpy(msg.username, name);
 		char ch[10];
-		sprintf(ch, "%d", channel + 5);
+		sprintf(ch, "%d", channel);
 		strcpy(msg.text, ch);
 		msg.flag = REDIRECT;
 
 		// write client information about channel number which will be used for permanent communication
 		write(server.client_fd, &msg, sizeof(struct message));
-
+		printf("sent channel for communication\n");
 		// close this socket
 		close(server.sock);
 
-		pthread_mutex_lock(&mutex);
+//		pthread_mutex_lock(&mutex);
 		clients_served++;
-		pthread_mutex_unlock(&mutex);
+//		pthread_mutex_unlock(&mutex);
 	}
 }
 
@@ -146,7 +147,7 @@ void accept_new_connection(void *id)
 	struct clients_in_service *elem = (struct clients_in_service *) (id);
 
 	listen(elem->sock, 1);
-//	printf("WAITING for connection on channel %d\n", elem->remote_address.rc_channel);
+	printf("WAITING for connection on channel %d\n", elem->remote_address.rc_channel);
 	elem->client_fd = accept(elem->sock, (struct sockaddr *) &elem->remote_address, &elem->len);
 	// set socket in non-blocking mode- read does not block write
 	fcntl(elem->client_fd, F_SETFL, O_NONBLOCK);
@@ -159,6 +160,7 @@ void accept_new_connection(void *id)
 		exit(-1);
 	}
 	printf("ACCEPTED ON channel: %d\n", elem->remote_address.rc_channel);
+
 	// put new client into clients served list
 	if (!root)
 	{
@@ -183,7 +185,7 @@ void accept_new_connection(void *id)
 	pthread_mutex_unlock(&mutex);
 }
 
-void init_socket(struct clients_in_service *client, int channel)
+int init_socket(struct clients_in_service *client, int channel)
 {
 	// set channel, protocol etc.
 	client->remote_address.rc_channel = (uint8_t) channel;
@@ -196,8 +198,10 @@ void init_socket(struct clients_in_service *client, int channel)
 		char message[100];
 		sprintf(message, "Could not bind socket to channel %d\n", client->remote_address.rc_channel);
 		perror(message);
-		exit(-1);
+		return -1;
 	}
+
+	return 0;
 }
 
 /**
@@ -231,7 +235,6 @@ void read_from_clients()
 				tmp = tmp->next;
 				free(msg);
 			}
-
 		}
 	}
 }
@@ -286,6 +289,7 @@ void send_msg(const char content[512], const char user[30], int fl)
  */
 void close_client_connection(struct clients_in_service *client)
 {
+//	channels_busy[(int)client->remote_address.rc_channel] = false;
 	struct clients_in_service *tmp = root;
 	if (client == root)
 	{
@@ -298,14 +302,14 @@ void close_client_connection(struct clients_in_service *client)
 	while (tmp->next != client)
 	{
 		tmp = tmp->next;
-	}
 
+	}
+	close(client->client_fd);
 	struct clients_in_service *nn = tmp->next->next;
 	free(client);
 	tmp->next = nn;
 
 }
-
 /**
  * Close connections with clients and shutdown server
  */
@@ -326,5 +330,15 @@ void close_server()
 		tmp = next;
 	}
 	root = NULL;
+}
+
+int get_next_channel(int start)
+{
+	for (int i = 4; i < 29; i++)
+	{
+		if (channels_busy[i] == false && i > start)
+			return i;
+	}
+	return -1;
 }
 
