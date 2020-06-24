@@ -8,9 +8,8 @@ int main(int argc, char **argv)
 	scanf("%s", user_name);
 
 	// scan server address which to connect
-	printf("Type server address: ");
-	scanf("%s", server_address);
-
+	printf("Type server human-friendly name : ");
+	scanf("%s", server_name);
 	// init screen for ncurses
 	initscr();
 	init();
@@ -45,8 +44,75 @@ int main(int argc, char **argv)
 
 void init()
 {
-	// get rid of new line character in server address
-	server_address[strlen(server_address)] = '\0';
+	//
+
+	// prepare socket
+	conn.sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
+	conn.remote_address.rc_family = AF_BLUETOOTH;
+	conn.remote_address.rc_channel = (uint8_t) 1;
+
+////	// search for device
+
+	inquiry_info *ii = NULL;
+	int max_rsp, num_rsp;
+	int dev_id, sock, len;
+	bool server_found = false;
+
+	dev_id = hci_get_route(NULL);
+	sock = hci_open_dev(dev_id);
+	if (dev_id < 0 || sock < 0)
+	{
+		perror("Error while opening socket\n");
+		exit(-1);
+	}
+
+	len = 8;
+	max_rsp = 10;
+	ii = (inquiry_info *) malloc(max_rsp * sizeof(inquiry_info));
+
+	for (int j = 0; j < 5; j++)
+	{
+		num_rsp = hci_inquiry(dev_id, len, max_rsp, NULL, &ii, IREQ_CACHE_FLUSH);
+		if (num_rsp < 0)
+		{
+			perror("Error while scanning for devices");
+		}
+
+		char name[32];
+		printf("FOUND %d devices\n", num_rsp);
+		for (int i = 0; i < num_rsp; i++)
+		{
+			if (hci_read_remote_name(sock, &(ii + i)->bdaddr, 32 * sizeof(char),
+									 name, 0) < 0)
+				strcpy(name, "[unknown]");
+
+			else
+			{
+				printf("NAME: %s\n", name);
+				// if name mached
+				if (!strcmp(name, server_name))
+				{
+					ba2str(&((ii + i)->bdaddr), server_address);
+					server_found = true;
+					printf("Server has been found\n");
+					printf("address is %s\n", server_address);
+					break;
+				}
+				else
+					printf("retrying to find\n");
+
+			}
+		}
+		if (server_found)
+			break;
+	}
+
+	if (!server_found)
+	{
+		perror("Could not find server\n");
+		exit(-1);
+	}
+
 	client_on = true;
 	cursor_position = 1;
 	// draw curses windows
@@ -62,6 +128,7 @@ void init()
 	conn.sock = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
 	conn.remote_address.rc_family = AF_BLUETOOTH;
 	conn.remote_address.rc_channel = (uint8_t) 1;
+
 	// convert string address into system-friendly variable
 	str2ba(server_address, &conn.remote_address.rc_bdaddr);
 }
@@ -180,14 +247,14 @@ void handle_message(struct message *msg)
 			break;
 		}
 
-		// server said he is closing connection
+			// server said he is closing connection
 		case CLOSE:
 		{
 			client_on = false;
 			close(conn.sock);
 			break;
 		}
-		// unused
+			// unused
 		case IGNORE:
 		{
 			return;

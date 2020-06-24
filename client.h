@@ -40,6 +40,7 @@ enum FLAGS { REDIRECT = 0, CLOSE = 1, PLAIN = 2, HELLO = 3, RESET = 4, IGNORE = 
 struct connection conn;
 volatile bool client_on;
 char user_name[30];
+char server_name[32];
 char server_address[32];
 int cursor_position;
 pthread_t read_thread;
